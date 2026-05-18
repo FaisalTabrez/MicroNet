@@ -1,0 +1,5 @@
+# config.yaml — MicroNet profiling pipeline configuration
+# Paths are relative to the project root (where Snakemake is invoked from).
+
+data_dir: "../../data"
+results_dir: "../../results"

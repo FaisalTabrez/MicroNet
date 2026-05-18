@@ -1,0 +1,106 @@
+# Snakefile — Phase 1: Taxonomic & Functional Profiling
+# Run: snakemake --cores 16 --use-conda
+
+from pathlib import Path
+import glob
+
+# ── Config ──────────────────────────────────────────────────────────────────
+configfile: "config.yaml"
+
+# FIX M1: Path() resolves relative to the Python CWD, not the Snakefile location.
+# When Snakemake is invoked from the project root with -s pipeline/01_profiling/Snakefile,
+# CWD is the project root, so "../../data" would resolve two levels above it — wrong.
+# Use workflow.basedir (the directory containing this Snakefile) as the anchor.
+SNAKEFILE_DIR = Path(workflow.basedir)
+DATA_DIR    = (SNAKEFILE_DIR / config["data_dir"]).resolve()
+RESULTS_DIR = (SNAKEFILE_DIR / config["results_dir"]).resolve()
+SAMPLES     = [Path(f).stem.replace("_1", "")
+               for f in glob.glob(str(DATA_DIR / "qc" / "*_1.fastq.gz"))]
+
+# ── Final targets ────────────────────────────────────────────────────────────
+rule all:
+    input:
+        RESULTS_DIR / "profiling" / "merged_metaphlan.tsv",
+        RESULTS_DIR / "profiling" / "merged_humann_pathabundance.tsv",
+        RESULTS_DIR / "profiling" / "clr_abundance_matrix.tsv",
+
+# ── MetaPhlAn4: Species-level relative abundance ─────────────────────────────
+rule metaphlan:
+    input:
+        r1 = DATA_DIR / "qc" / "{sample}_1.fastq.gz",
+        r2 = DATA_DIR / "qc" / "{sample}_2.fastq.gz",
+    output:
+        profile = RESULTS_DIR / "profiling" / "metaphlan" / "{sample}_profile.tsv",
+        bowtie2 = RESULTS_DIR / "profiling" / "metaphlan" / "{sample}.bowtie2.bz2",
+    threads: 8
+    conda: "../../envs/micronet.yml"
+    shell:
+        """
+        metaphlan {input.r1},{input.r2} \
+            --input_type fastq \
+            --bowtie2out {output.bowtie2} \
+            --nproc {threads} \
+            --output_file {output.profile} \
+            --add_viruses \
+            --unknown_estimation
+        """
+
+rule merge_metaphlan:
+    input:
+        expand(RESULTS_DIR / "profiling" / "metaphlan" / "{sample}_profile.tsv",
+               sample=SAMPLES)
+    output:
+        RESULTS_DIR / "profiling" / "merged_metaphlan.tsv"
+    conda: "../../envs/micronet.yml"
+    shell:
+        "merge_metaphlan_tables.py {input} > {output}"
+
+# ── HUMAnN3: Functional pathway abundance ───────────────────────────────────
+rule humann:
+    input:
+        r1     = DATA_DIR / "qc" / "{sample}_1.fastq.gz",
+        r2     = DATA_DIR / "qc" / "{sample}_2.fastq.gz",
+        bowtie2 = RESULTS_DIR / "profiling" / "metaphlan" / "{sample}.bowtie2.bz2",
+    output:
+        pathways = RESULTS_DIR / "profiling" / "humann" / "{sample}_pathabundance.tsv",
+        genes    = RESULTS_DIR / "profiling" / "humann" / "{sample}_genefamilies.tsv",
+        cat_reads = temp(RESULTS_DIR / "profiling" / "humann" / "{sample}_cat.fastq"),
+    threads: 16
+    conda: "../../envs/micronet.yml"
+    shell:
+        """
+        # FIX m1: zcat is Unix-only. gzip -dc is portable and available via conda.
+        gzip -dc {input.r1} {input.r2} > {output.cat_reads}
+
+        humann \
+            --input {output.cat_reads} \
+            --output $(dirname {output.pathways}) \
+            --threads {threads} \
+            --taxonomic-profile {input.bowtie2} \
+            --output-basename {wildcards.sample} \
+            --remove-temp-output
+        """
+
+rule merge_humann:
+    input:
+        expand(RESULTS_DIR / "profiling" / "humann" / "{sample}_pathabundance.tsv",
+               sample=SAMPLES)
+    output:
+        RESULTS_DIR / "profiling" / "merged_humann_pathabundance.tsv"
+    conda: "../../envs/micronet.yml"
+    shell:
+        """
+        humann_join_tables --input $(dirname {input[0]}) \
+            --file-name pathabundance \
+            --output {output}
+        """
+
+# ── CLR Normalization ─────────────────────────────────────────────────────────
+rule clr_normalize:
+    input:
+        RESULTS_DIR / "profiling" / "merged_metaphlan.tsv"
+    output:
+        RESULTS_DIR / "profiling" / "clr_abundance_matrix.tsv"
+    conda: "../../envs/micronet.yml"
+    script:
+        "clr_normalize.py"

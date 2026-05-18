@@ -1,0 +1,176 @@
+﻿
+MicroNet
+Microbial Ecological Network Reconstruction
+Inferring Cooperation, Competition, and Symbiosis from Metagenomics Data
+
+Project Design Document  |  Version 1.0
+May 2026
+
+
+
+Table of Contents
+
+1. Executive Summary
+MicroNet is a computational metagenomics project that reconstructs ecological interaction networks from microbial community sequencing data. By combining three complementary inference strategies ΓÇö sparse co-occurrence analysis, generalized Lotka-Volterra (gLV) dynamical modeling, and Graph Neural Networks (GNNs) ΓÇö MicroNet produces a signed, weighted ecological graph encoding cooperation, competition, and symbiosis between microbial taxa.
+
+The project addresses a fundamental challenge in microbial ecology: observational data (who is present, how abundant) does not directly reveal interactions (who helps or harms whom). MicroNet bridges this gap by treating interaction inference as a machine learning problem over graph-structured biological data.
+
+
+2. Scientific Background
+2.1 Why Microbial Ecological Networks?
+Microbial communities drive virtually every biogeochemical process on Earth ΓÇö from nitrogen fixation in soil to vitamin synthesis in the human gut. Despite their importance, the ecological rules governing these communities remain poorly understood. Network-theoretic approaches offer a powerful framework: by representing taxa as nodes and interactions as edges, we can apply decades of ecological and graph theory to understand community structure, stability, and function.
+
+Microbial ecological networks have direct applications in:
+Clinical medicine ΓÇö identifying keystone gut taxa whose disruption drives IBD, obesity, or antibiotic-associated diarrhea
+Agriculture ΓÇö engineering soil microbiome networks to improve crop yields
+Biotechnology ΓÇö designing stable, productive synthetic communities for fermentation
+Environmental monitoring ΓÇö tracking ecosystem health via network topology
+
+2.2 The Compositionality Problem
+Metagenomics data is compositional: relative abundances sum to one, so an increase in one taxon mathematically decreases others ΓÇö even with no biological interaction. Naively computing Pearson or Spearman correlations on relative abundances produces spurious negative correlations and inflated positives.
+
+MicroNet addresses this in two ways. First, all abundance data undergoes Centered Log-Ratio (CLR) transformation, which maps compositions to a Euclidean space where standard statistical methods apply. Second, SPIEC-EASI inference uses sparse inverse covariance estimation, which explicitly conditions each pairwise relationship on all other taxa ΓÇö filtering out indirect associations.
+
+
+2.3 Ecological Interaction Types
+The interaction matrix A inferred by gLV encodes five ecologically meaningful relationship types, classified by the signs of Aß╡óΓ▒╝ and AΓ▒╝ß╡ó:
+
+
+3. Recommended Datasets
+MicroNet is validated on four public datasets spanning human gut, global soil, marine, and synthetic communities. All are freely accessible via NCBI SRA or EBI Metagenomics.
+
+3.1 Primary Dataset: iHMP Phase 2
+
+The iHMP dataset is the primary training and validation dataset. Its longitudinal structure is critical for gLV inference, which requires estimating dx/dt from successive measurements. The disease cohorts provide biologically meaningful contrast ΓÇö comparing healthy vs. disease microbiome networks tests the biological validity of inferred interactions.
+
+3.2 Cross-Environment Comparison: Earth Microbiome Project
+
+3.3 Benchmarking: CAMI2 Synthetic Communities
+CAMI2 provides simulated metagenomes with known ground-truth community composition, enabling rigorous validation of interaction inference methods. Because the true interaction strengths are specified by the simulation parameters, CAMI2 allows direct computation of inference accuracy (precision, recall, F1) ΓÇö something impossible with real data where ground truth is unknown.
+
+URL: https://data.cami-challenge.org/
+Simulated from real genome databases with controlled complexity levels
+Used exclusively for benchmarking SPIEC-EASI vs. SparCC vs. gLV vs. GNN
+
+3.4 Marine Cross-Validation: TARA Oceans
+The TARA Oceans expedition sampled marine surface water across the globe, generating a uniquely diverse set of microbial communities with rich environmental metadata (temperature, salinity, nutrient concentrations). Using TARA Oceans as a held-out cross-validation set tests whether GNN-learned interaction embeddings generalize across radically different biomes.
+
+EBI Metagenomics Study ID: MGYS00002008
+~200 stations across Atlantic, Pacific, Indian, and Arctic Oceans
+Shotgun WGS with matched physical-chemical metadata
+
+4. Pipeline Architecture
+The MicroNet pipeline is organized into five sequential phases, each implemented as a discrete software module. The full pipeline is orchestrated by Snakemake for reproducibility and parallel execution.
+
+4.1 Phase 0: Data Acquisition and QC
+Raw paired-end FASTQ files are downloaded from NCBI SRA using fasterq-dump and pysradb. Quality control is performed with fastp, which trims Illumina adapters, removes low-quality bases (Q < 20), and filters reads shorter than 50 bp. QC metrics are aggregated into a MultiQC report for manual inspection before proceeding.
+
+Tool: fastp v0.23 ΓÇö adapter trimming, quality filtering, length filtering
+Tool: fasterq-dump ΓÇö parallel FASTQ retrieval from NCBI SRA
+Tool: MultiQC ΓÇö aggregated QC report across all samples
+Checkpoint: samples with < 500,000 post-QC reads are flagged for exclusion
+
+4.2 Phase 1: Taxonomic and Functional Profiling
+Taxonomic composition is quantified at species level using MetaPhlAn4, which aligns reads against a curated database of clade-specific marker genes. Functional pathway abundance is estimated using HUMAnN3, which translates taxonomic profiles into KEGG pathway and gene family abundances. Both tools are run per sample; outputs are merged into community-level matrices.
+
+
+The merged species abundance matrix is then normalized using CLR transformation after filtering taxa present in fewer than 10% of samples or with mean relative abundance below 0.01%. This typically reduces the taxon count from thousands to 100-500 species of ecological relevance.
+
+4.3 Phase 2: Interaction Inference
+4.3.1 SPIEC-EASI Co-occurrence Network
+SPIEC-EASI (Sparse and Compositionally Robust Inference of Ecological Association Networks) constructs a sparse network by solving a graphical LASSO problem: for each taxon, it finds the minimal set of other taxa that explain its variance when conditioned on all others. Unlike pairwise correlations, this removes indirect associations ΓÇö if A and B are both correlated with C, SPIEC-EASI correctly identifies that only two of the three relationships are direct.
+
+Network stability is assessed using the StARS (Stability Approach to Regularization Selection) criterion, which selects the sparsity parameter that produces stable edge selections across subsampled datasets. This produces a sparse, reproducible network with interpretable partial correlation edge weights.
+
+4.3.2 Generalized Lotka-Volterra Inference
+The gLV model treats microbial community dynamics as a system of coupled differential equations: the per-capita growth rate of each taxon is a linear function of all other taxaΓÇÖs abundances. The interaction matrix A encodes these relationships, with Aß╡óΓ▒╝ > 0 indicating that taxon j promotes taxon i, and Aß╡óΓ▒╝ < 0 indicating inhibition.
+
+For longitudinal data, finite differences approximate dx/dt from successive abundance measurements. The system is then solved as a LASSO regression problem per taxon, with regularization enforcing sparsity (most taxa do not directly interact). The resulting interaction matrix is directed and signed ΓÇö enabling classification of all five ecological interaction types.
+
+
+4.3.3 Bayesian Network Structure Learning
+As a third inference method, Bayesian network structure learning (hill-climbing with BIC scoring) produces directed acyclic graphs (DAGs) representing conditional independence relationships. This approach is most useful for incorporating prior biological knowledge as informative priors ΓÇö for example, known metabolic dependencies or phylogenetic constraints.
+
+4.4 Phase 3: Graph Neural Network Training
+The VGAE (Variational Graph Autoencoder) learns rich latent representations of microbial taxa by encoding node features through graph convolution layers, then decoding by predicting edge existence from node embedding inner products. This architecture simultaneously achieves two goals: (1) link prediction, inferring high-confidence edges not captured by co-occurrence, and (2) representation learning, embedding taxa in a continuous latent space where similar ecological roles are geometrically proximate.
+
+4.4.1 Node Features
+Each taxon node is described by a concatenated feature vector containing:
+CLR-transformed abundance profile across all samples (captures niche preferences)
+Functional gene content vector from HUMAnN3 (captures metabolic capabilities)
+Phylogenetic embedding ΓÇö node2vec walk on PhyloT tree (captures evolutionary proximity)
+Genome-level features from MAGs: GC content, genome size, completeness (optional)
+
+4.4.2 Training Objective
+The model is trained to minimize the Evidence Lower Bound (ELBO): the sum of binary cross-entropy reconstruction loss (do predicted edges match observed co-occurrence edges?) and KL divergence (how far is the learned latent distribution from a standard Gaussian prior?). An auxiliary interaction type classification head is trained jointly using gLV-labeled edges as supervision, improving the semantic content of node embeddings.
+
+4.4.3 Link Prediction
+After training, the full N├ùN edge probability matrix is computed from node embedding inner products. Edges with probability > 0.7 that are absent from the SPIEC-EASI network are added as GNN-predicted interactions, substantially increasing network coverage for rare or low-abundance taxa.
+
+4.5 Phase 4: Network Topology Analysis
+The consensus network (SPIEC-EASI edges annotated with gLV types, plus high-confidence GNN predictions) is analyzed using NetworkX and iGraph for ecological interpretation.
+
+Keystone taxa identification: composite centrality score from betweenness, eigenvector, closeness, and hub scores
+Ecological guild detection: Leiden community detection reveals functional clusters of mutually interacting taxa
+Robustness simulation: sequential taxon removal under targeted (betweenness-first) and random strategies, tracking community collapse
+Small-world testing: comparison of clustering coefficient and path length to random graphs (Watts-Strogatz sigma)
+Scale-free testing: power-law fit to degree distribution (scale-free networks have hubs that disproportionately stabilize the community)
+
+4.6 Phase 5: Visualization Dashboard
+A Streamlit web dashboard provides interactive exploration of all pipeline outputs without requiring programming knowledge. The dashboard renders a force-directed network graph using Plotly with interactive node hovering, edge filtering by weight and interaction type, layout algorithm selection, and taxon drilldown. Additional tabs display keystone taxon rankings, guild compositions, robustness curves, and topology summary statistics.
+
+5. Technology Stack
+
+
+6. Novelty and Research Contributions
+MicroNet makes the following original contributions relative to existing tools and published methods:
+
+6.1 Multi-method Ensemble
+Existing tools (SPIEC-EASI, SparCC, FlashWeave) each implement a single inference strategy. MicroNet is, to our knowledge, the first systematic ensemble that combines co-occurrence, dynamical (gLV), and representation learning (GNN) approaches within a unified pipeline ΓÇö with explicit benchmarking of each method against ground truth (CAMI2) and against each other.
+
+6.2 Supervised Interaction Type Labeling
+Most existing network tools produce unsigned or weakly signed edges without ecological interpretation. MicroNet introduces the first GNN architecture with a jointly trained interaction type classification head ΓÇö using gLV-inferred labels as weak supervision. This means node embeddings encode not just co-occurrence patterns, but ecological role.
+
+6.3 Dynamic Network Reconstruction
+By exploiting the longitudinal structure of iHMP data, MicroNet can track how microbial ecological networks rewire during disease progression, treatment, or environmental perturbation. Using EvolveGCN or temporal graph attention networks on the longitudinal subsets extends the framework to detect dynamic interaction changes.
+
+6.4 Robustness-Informed Keystone Identification
+Existing keystone taxa analyses use a single centrality metric (usually betweenness). MicroNet introduces a composite keystone score from six centrality metrics, validated by robustness simulation: taxa ranked highly by the composite score should trigger faster community collapse when removed. This provides an empirical, rather than purely structural, definition of ecological keystoneness.
+
+7. Validation Strategy
+
+7.1 Synthetic Community Benchmarking
+Using CAMI2 synthetic metagenomes with known community composition, we validate each inference method by:
+Precision and recall of inferred edges relative to known species co-occurrence
+F1 score for interaction type classification (mutualism vs. competition etc.) against simulation parameters
+AUC-ROC for binary edge prediction
+Spearman correlation between inferred A matrix and true interaction coefficients
+
+7.2 Cross-Dataset Generalization
+GNN models trained on iHMP gut data are tested zero-shot on TARA Oceans marine data. Better-than-random link prediction AUC on the held-out dataset indicates that learned embeddings capture biologically general interaction patterns rather than dataset-specific artifacts.
+
+7.3 Biological Validation
+Inferred cooperative interactions (mutualism, commensalism) are validated against published cross-feeding literature. For example, Faecalibacterium prausnitzii and butyrate producers are known to cooperate in the healthy gut microbiome; their positive interaction should appear in the network. Predicted keystone taxa are cross-referenced against published experimental depletion studies.
+
+7.4 Stability Analysis
+The gLV model predicts community stability from the eigenvalues of the Jacobian at equilibrium. Communities with all negative real eigenvalues are locally stable. We test whether inferred interaction matrices predict stability concordant with observed community temporal stability in longitudinal iHMP samples.
+
+8. Expected Outputs
+
+
+9. Suggested Project Timeline
+
+
+10. Key References
+The following works form the methodological foundation of MicroNet:
+
+Kurtz et al. (2015). Sparse and compositionally robust inference of microbial ecological networks. PLoS Computational Biology.
+Faust & Raes (2012). Microbial interactions: from networks to models. Nature Reviews Microbiology.
+Stein et al. (2013). Ecological modeling from time-series inference: insight into dynamics and stability of intestinal microbiota. PLoS Computational Biology.
+Kipf & Welling (2016). Variational Graph Autoencoders. arXiv:1611.07308.
+Franzosa et al. (2018). Species-level functional profiling of metagenomes and metatranscriptomes. Nature Methods (HUMAnN3).
+Beghini et al. (2021). Integrating taxonomic, functional, and strain-level profiling of diverse microbial communities with bioBakery 3. eLife (MetaPhlAn4).
+Lloyd-Price et al. (2019). Multi-omics of the gut microbial ecosystem in inflammatory bowel diseases. Nature (iHMP IBD).
+Thompson et al. (2017). A communal catalogue reveals EarthΓÇÖs multiscale microbial diversity. Nature (EMP).
+Sunagawa et al. (2015). Structure and function of the global ocean microbiome. Science (TARA Oceans).
+

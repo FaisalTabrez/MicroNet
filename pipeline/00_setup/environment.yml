@@ -1,0 +1,74 @@
+name: micronet
+channels:
+  - conda-forge
+  - bioconda
+  - defaults
+
+dependencies:
+  # Core Python
+  - python=3.11
+  - pip
+
+  # Bioinformatics tools (via bioconda)
+  - metaphlan=4.0
+  - humann=3.8
+  - kraken2=2.1.3
+  - bracken=2.8
+  - seqkit=2.5
+  - fastp=0.23          # Read QC & trimming
+
+  # Python scientific stack
+  - numpy=1.26
+  - pandas=2.1
+  - scipy=1.11
+  - scikit-learn=1.3
+  - scikit-bio=0.5.9
+  - statsmodels=0.14
+
+  # Visualization
+  - matplotlib=3.8
+  - seaborn=0.13
+  - plotly=5.18
+  - streamlit=1.29
+
+  # Network analysis
+  - networkx=3.2
+  - python-igraph=0.11
+  - leidenalg=0.10       # Required for Leiden community detection (topology.py)
+
+  # Jupyter
+  - jupyterlab=4.0
+  - ipywidgets=8.1
+
+  # R integration
+  - r-base=4.3
+  - rpy2=3.5
+
+  - pip:
+      # Deep learning / GNN
+      # FIX m6: torch-scatter and torch-sparse must be compiled against the exact
+      # PyTorch + CUDA version. Without --find-links pointing to the PyG wheel
+      # server, pip either fails (missing C++ toolchain) or installs a CPU-only
+      # build silently. Pin the index to torch 2.1.0 + CUDA 12.1 builds.
+      # For CPU-only machines replace cu121 with cpu in the URL below.
+      - torch==2.1.0
+      - --find-links https://data.pyg.org/whl/torch-2.1.0+cu121.html
+      - torch-geometric==2.4.0
+      - torch-scatter==2.1.2
+      - torch-sparse==0.6.18
+
+      # Bayesian inference
+      - pymc==5.9
+      - arviz==0.17
+
+      # Metagenomics utilities
+      # NOTE: scikit-bio is intentionally listed only under conda (above) —
+      # removing from pip to avoid the conda/pip version conflict (FIX m1).
+      - biom-format==2.1.15
+
+      # Data fetching
+      - pysradb==2.1
+      - biopython==1.81
+
+      # Metabolic modeling (optional)
+      - micom==0.35

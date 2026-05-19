@@ -322,11 +322,18 @@ def main():
         json.dump(history, f)
 
     # Plot learning curves
+    # FIX I2: after the M7 fix, history["loss"] has one entry per epoch (not per
+    # 10 epochs), so "Epoch (×10)" was misleading. AUC/AP are still sampled every
+    # 10 epochs, so their x-axis is labelled separately for clarity.
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 4))
-    ax1.plot(history["loss"]); ax1.set_title("ELBO Loss"); ax1.set_xlabel("Epoch (×10)")
+    ax1.plot(history["loss"])
+    ax1.set_title("ELBO Loss")
+    ax1.set_xlabel("Epoch")
     ax2.plot(history["val_auc"], label="AUC")
     ax2.plot(history["val_ap"],  label="AP")
-    ax2.set_title("Validation Metrics"); ax2.set_xlabel("Epoch (×10)"); ax2.legend()
+    ax2.set_title("Validation Metrics")
+    ax2.set_xlabel("Evaluation checkpoint (every 10 epochs)")
+    ax2.legend()
     plt.tight_layout()
     plt.savefig(outdir / "training_curves.png", dpi=150)
 

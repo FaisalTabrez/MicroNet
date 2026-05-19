@@ -276,13 +276,20 @@ def main():
         col3.metric("Network density", f"{nx.density(G):.4f}")
         col4.metric("Avg. clustering", f"{nx.average_clustering(G):.4f}")
 
-        if "interactions" in data:
-            itype_counts = data["interactions"]["interaction_type"].value_counts()
+        if G.number_of_edges() > 0:
+            # FIX I4: data["interactions"] contains ALL classified interactions,
+            # regardless of the min_weight filter or max_nodes limit currently
+            # applied to the visible graph. Computing the pie from the full file
+            # shows interaction types for edges that are hidden — visual disconnect.
+            # Derive counts from the actual visible graph edges instead.
+            visible_types = [d.get("interaction_type", "Unknown")
+                             for _, _, d in G.edges(data=True)]
+            itype_counts = pd.Series(visible_types).value_counts()
             fig_pie = px.pie(values=itype_counts.values,
                              names=itype_counts.index,
                              color=itype_counts.index,
                              color_discrete_map=INTERACTION_COLORS,
-                             title="Interaction Type Distribution")
+                             title="Interaction Type Distribution (visible edges only)")
             st.plotly_chart(fig_pie, use_container_width=True)
 
     with tab2:

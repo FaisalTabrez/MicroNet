@@ -105,9 +105,15 @@ print(stats)
 write_tsv(stats, file.path(args$outdir, "spieceasi_network_stats.tsv"))
 
 # ── Save outputs ──────────────────────────────────────────────────────────────
-# Weighted adjacency matrix
+# Weighted adjacency matrix — FIX M1: save adj_masked, not adj_weight.
+# adj_weight is the full dense partial-correlation matrix from the LASSO;
+# it contains near-zero noise entries for every pair of taxa.
+# adj_masked zeroes out all edges not selected by the StARS criterion, so the
+# TSV matches exactly what the igraph object g contains.
+# topology.py, train_vgae.py, and dashboard.py all read this TSV — they must
+# see the same edge set as the R pipeline's own graph, not a denser one.
 write_tsv(
-  as.data.frame(as.matrix(adj_weight)) |> tibble::rownames_to_column("taxon"),
+  as.data.frame(as.matrix(adj_masked)) |> tibble::rownames_to_column("taxon"),
   file.path(args$outdir, "spieceasi_adj_weighted.tsv")
 )
 

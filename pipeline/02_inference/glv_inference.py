@@ -165,8 +165,12 @@ def fit_glv_pss(X: np.ndarray,
         coefs = model.coef_
         A[i, :i]   = coefs[:i]
         A[i, i+1:] = coefs[i:]
-        # Self-regulation: diagonal estimated as negative of mean coefficient magnitude
-        A[i, i] = -np.abs(coefs).mean()
+        # Heuristic: self-regulation proportional to average interaction strength.
+        # NOTE: The LIMITS algorithm (Fisher & Mehta 2014) does not prescribe a
+        # specific diagonal estimator — this is a reasonable approximation but not
+        # literature-derived. Make it robust to the edge case of an all-zero coef
+        # vector (e.g. perfectly regularised to zero by LASSO).
+        A[i, i] = -np.abs(coefs).mean() if len(coefs) > 0 and np.any(coefs != 0) else -1.0
 
     return A, r
 
@@ -305,17 +309,37 @@ def main():
     # Check for time-series structure
     if "time_point" in meta.columns and "subject_id" in meta.columns:
         print("Time-series data detected — using temporal gLV inference")
-        # Group by subject, stack time points
         all_X, all_dX = [], []
+        skipped = 0
         for subj, grp in meta.groupby("subject_id"):
             grp = grp.sort_values("time_point")
-            X = clr.loc[grp.index].values
+            # FIX L1: subjects with only one timepoint produce (0, N) arrays from
+            # compute_derivatives(). These silently add zero rows to X_all/dX_all,
+            # inflate sample counts, and crash the LASSO if ALL subjects are singletons.
+            if len(grp) < 2:
+                print(f"  Skipping subject {subj}: only {len(grp)} timepoint(s) — need ≥2")
+                skipped += 1
+                continue
+            X     = clr.loc[grp.index].values
             times = grp["time_point"].values.astype(float)
             dX, X_mid = compute_derivatives(X, times)
             all_X.append(X_mid)
             all_dX.append(dX)
-        X_all = np.vstack(all_X)
-        dX_all = np.vstack(all_dX)
+
+        if skipped:
+            print(f"  Skipped {skipped} subject(s) with <2 timepoints.")
+
+        if not all_X:
+            # No usable longitudinal data — fall back gracefully
+            print("WARNING: No subjects with ≥2 timepoints found. "
+                  "Falling back to pseudo-steady-state inference.")
+            X_all  = clr.values
+            dX_all = None
+        else:
+            X_all  = np.vstack(all_X)
+            dX_all = np.vstack(all_dX)
+            print(f"  Using {X_all.shape[0]} time-step pairs from "
+                  f"{len(all_X)} subject(s)")
     else:
         # FIX C1 (v2): The previous fix set dX_all=zeros, which made every
         # per-capita growth rate zero → LASSO learned A=0 for all taxa.

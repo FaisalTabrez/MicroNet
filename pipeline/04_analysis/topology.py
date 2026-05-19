@@ -120,10 +120,25 @@ def compute_centralities(G: nx.Graph) -> pd.DataFrame:
     df = pd.DataFrame(centralities).fillna(0)
     df.index.name = "taxon"
 
-    # Composite keystone score (normalized sum)
+    # I3: betweenness and closeness are computed on the LCC only. Nodes outside
+    # the LCC receive 0 for both metrics via fillna(0), which is semantically
+    # correct (zero shortest-path involvement) but deflates their composite
+    # keystone score. Flag them explicitly so users aren't misled.
+    lcc_nodes = set(max(nx.connected_components(G), key=len))
+    df["in_lcc"] = df.index.map(lambda n: n in lcc_nodes)
+    n_isolated = (~df["in_lcc"]).sum()
+    if n_isolated:
+        print(f"  Note: {n_isolated} taxa are outside the largest connected component. "
+              "Their betweenness and closeness are 0 by definition, not by ecology. "
+              "Interpret their keystone scores with caution.")
+
+    # Composite keystone score (normalized sum of continuous centrality metrics)
     from sklearn.preprocessing import MinMaxScaler
+    score_cols = ["degree", "betweenness", "eigenvector", "closeness",
+                  "hub_score", "pagerank", "strength"]
     scaler = MinMaxScaler()
-    normed = pd.DataFrame(scaler.fit_transform(df), index=df.index, columns=df.columns)
+    normed = pd.DataFrame(scaler.fit_transform(df[score_cols]),
+                          index=df.index, columns=score_cols)
     df["keystone_score"] = normed.mean(axis=1)
     df = df.sort_values("keystone_score", ascending=False)
 
@@ -285,13 +300,22 @@ def test_scale_free(G: nx.Graph) -> dict:
     from collections import Counter
     degrees = [d for _, d in G.degree() if d > 0]
 
-    # FIX M4: previous code used np.arange(1, len(bincount)+1) as the X axis —
-    # sequential indices, not degree values. For sparse degree sequences this
-    # introduced zero-count bins (huge negative log outliers) and wrong X values.
-    # Use actual observed degree values as X.
     deg_counts = Counter(degrees)
     k_vals  = np.array(sorted(deg_counts.keys()), dtype=float)
     counts  = np.array([deg_counts[k] for k in k_vals], dtype=float)
+
+    # FIX L3: stats.linregress raises ValueError when given fewer than 2 points.
+    # This happens on regular graphs (every node same degree) or tiny networks.
+    # Return a safe non-scale-free result rather than crashing.
+    if len(k_vals) < 2:
+        print(f"  test_scale_free: only {len(k_vals)} unique degree value(s) — "
+              "cannot fit power law. Network is likely regular or near-regular.")
+        return {
+            "power_law_exponent": float("nan"),
+            "r_squared": 0.0,
+            "p_value": 1.0,
+            "is_scale_free": False,
+        }
 
     slope, intercept, r, p, se = stats.linregress(np.log(k_vals), np.log(counts))
     return {

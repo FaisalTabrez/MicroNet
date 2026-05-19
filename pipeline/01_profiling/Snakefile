@@ -33,7 +33,7 @@ rule metaphlan:
         profile = RESULTS_DIR / "profiling" / "metaphlan" / "{sample}_profile.tsv",
         bowtie2 = RESULTS_DIR / "profiling" / "metaphlan" / "{sample}.bowtie2.bz2",
     threads: 8
-    conda: "../../envs/micronet.yml"
+    conda: "../00_setup/environment.yml"
     shell:
         """
         metaphlan {input.r1},{input.r2} \
@@ -51,7 +51,7 @@ rule merge_metaphlan:
                sample=SAMPLES)
     output:
         RESULTS_DIR / "profiling" / "merged_metaphlan.tsv"
-    conda: "../../envs/micronet.yml"
+    conda: "../00_setup/environment.yml"
     shell:
         "merge_metaphlan_tables.py {input} > {output}"
 
@@ -66,7 +66,7 @@ rule humann:
         genes    = RESULTS_DIR / "profiling" / "humann" / "{sample}_genefamilies.tsv",
         cat_reads = temp(RESULTS_DIR / "profiling" / "humann" / "{sample}_cat.fastq"),
     threads: 16
-    conda: "../../envs/micronet.yml"
+    conda: "../00_setup/environment.yml"
     shell:
         """
         # FIX m1: zcat is Unix-only. gzip -dc is portable and available via conda.
@@ -87,7 +87,7 @@ rule merge_humann:
                sample=SAMPLES)
     output:
         RESULTS_DIR / "profiling" / "merged_humann_pathabundance.tsv"
-    conda: "../../envs/micronet.yml"
+    conda: "../00_setup/environment.yml"
     shell:
         """
         humann_join_tables --input $(dirname {input[0]}) \
@@ -101,6 +101,6 @@ rule clr_normalize:
         RESULTS_DIR / "profiling" / "merged_metaphlan.tsv"
     output:
         RESULTS_DIR / "profiling" / "clr_abundance_matrix.tsv"
-    conda: "../../envs/micronet.yml"
+    conda: "../00_setup/environment.yml"
     script:
         "clr_normalize.py"
